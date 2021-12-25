@@ -1,0 +1,6 @@
+install( DIRECTORY ${PROJECT_SOURCE_DIR}/include/secpolicy
+  DESTINATION usr/include
+  USE_SOURCE_PERMISSIONS
+  FILES_MATCHING
+  PATTERN "*.hpp"
+)
