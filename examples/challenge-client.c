@@ -58,6 +58,11 @@ done:
     return ret;
 }
 
+static void _free_challenge(secpolicy_challenge_t *challenge, void *ctx)
+{
+    free(challenge->data);
+}
+
 int main()
 {
     int sock;
@@ -71,7 +76,7 @@ int main()
         die("secpolicy_create");
     }
 
-    secpolicy_challenge(policy, NULL, NULL, NULL, _solve_challenge, NULL);
+    secpolicy_challenge_solve(policy, _solve_challenge, _free_challenge, NULL);
 
     if (secpolicy_apply(policy, sock, &result)) {
         die("secpolicy_apply");

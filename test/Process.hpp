@@ -18,6 +18,7 @@ class Process final {
             ::exit(0);
         } else {
             parent();
+            ::kill(pid, 9);
             int wstatus;
             ::waitpid(pid, &wstatus, 0);
         }

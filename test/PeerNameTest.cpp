@@ -105,6 +105,7 @@ TEST_CASE("Peer Name Test")
                 []() {
                     ClientSocket client;
                     client.open("test.sock");
+                    ::pause();
                 });
 
             REQUIRE(ret == 0);

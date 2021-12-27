@@ -28,6 +28,7 @@ typedef struct secpolicy secpolicy_t;
 typedef uint64_t secpolicy_result_t;
 
 typedef struct {
+    int sock;
     pid_t pid;
     char program[PATH_MAX];
     uid_t uid;
@@ -69,25 +70,37 @@ void secpolicy_destroy(secpolicy_t *policy);
 void secpolicy_perms(secpolicy_t *policy, mode_t perms);
 
 /**
- * @brief Generate a challenge for the peer to solve.
+ * @brief Create a challenge for the peer to solve.
  *
- * @note Experimental. API is subject to change.
+ * @note The peer must use this library to solve the challenge
+ * (secpolicy_challenge_solve).
  *
  * @param[in] policy Pointer to security policy
  * @param[in] create Callback to create challenge
  * @param[in] destroy Callback to destroy challenge
  * @param[in] verify Callback to verify peer response
- * @param[in] solve Callback to solve peer challenge
  * @param[in] ctx User context (optional)
  */
-void secpolicy_challenge(secpolicy_t *policy,
-                         bool (*create)(secpolicy_challenge_t *, void *),
-                         void (*destroy)(secpolicy_challenge_t *, void *),
-                         bool (*verify)(const secpolicy_challenge_t *,
-                                        const secpolicy_challenge_t *, void *),
-                         bool (*solve)(const secpolicy_challenge_t *,
-                                       secpolicy_challenge_t *, void *),
-                         void *ctx);
+void secpolicy_challenge_create(
+    secpolicy_t *policy, bool (*create)(secpolicy_challenge_t *, void *),
+    void (*destroy)(secpolicy_challenge_t *, void *),
+    bool (*verify)(const secpolicy_challenge_t *, const secpolicy_challenge_t *,
+                   void *),
+    void *ctx);
+
+/**
+ * @brief Solve a challenge sent by a peer.
+ *
+ * @param[in] policy Pointer to security policy
+ * @param[in] solve Callback to solve peer challenge
+ * @param[in] destroy Callback to destroy challenge
+ * @param[in] ctx User context (optional)
+ */
+void secpolicy_challenge_solve(secpolicy_t *policy,
+                               bool (*solve)(const secpolicy_challenge_t *,
+                                             secpolicy_challenge_t *, void *),
+                               void (*destroy)(secpolicy_challenge_t *, void *),
+                               void *ctx);
 
 /**
  * @brief Policy for peer user ID and group ID.
@@ -152,6 +165,7 @@ void secpolicy_cb(secpolicy_t *policy,
  *
  * EINVAL   Invalid parameters to function
  * EBADF    Could not retrieve peer information from provided socket
+ * ENOMEM   Failed to allocate memory
  *
  */
 int secpolicy_apply(secpolicy_t *policy, int sock, secpolicy_result_t *result);

@@ -11,8 +11,8 @@ class ClientSocket {
   public:
     bool open(const std::string &path)
     {
-        int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (sock == -1) {
+        sock_ = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock_ == -1) {
             return false;
         }
 
@@ -21,11 +21,16 @@ class ClientSocket {
         name.sun_family = AF_UNIX;
         strncpy(name.sun_path, path.c_str(), sizeof(name.sun_path));
 
-        if (connect(sock, (const struct sockaddr *)&name, sizeof(name))) {
+        if (connect(sock_, (const struct sockaddr *)&name, sizeof(name))) {
             return false;
         }
 
         return true;
+    }
+
+    int sock() const
+    {
+        return sock_;
     }
 
     ~ClientSocket()

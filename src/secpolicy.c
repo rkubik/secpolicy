@@ -1,13 +1,13 @@
 #include "secpolicy/secpolicy.h"
 
+#include "challenge.h"
+#include "comms.h"
 #include "peer.h"
-#include "proto.h"
 #include "strlcpy.h"
 
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -35,7 +35,14 @@ typedef struct {
         bool (*solve)(const secpolicy_challenge_t *, secpolicy_challenge_t *,
                       void *);
         void *ctx;
-    } challenge;
+    } challenge_create;
+    struct {
+        bool enable;
+        bool (*solve)(const secpolicy_challenge_t *, secpolicy_challenge_t *,
+                      void *);
+        void (*destroy)(secpolicy_challenge_t *, void *);
+        void *ctx;
+    } challenge_solve;
     struct {
         bool enable;
         char path[PATH_MAX];
@@ -73,22 +80,33 @@ void secpolicy_perms(secpolicy_t *policy, mode_t perms)
     }
 }
 
-void secpolicy_challenge(secpolicy_t *policy,
-                         bool (*create)(secpolicy_challenge_t *, void *),
-                         void (*destroy)(secpolicy_challenge_t *, void *),
-                         bool (*verify)(const secpolicy_challenge_t *,
-                                        const secpolicy_challenge_t *, void *),
-                         bool (*solve)(const secpolicy_challenge_t *,
-                                       secpolicy_challenge_t *, void *),
-                         void *ctx)
+void secpolicy_challenge_create(
+    secpolicy_t *policy, bool (*create)(secpolicy_challenge_t *, void *),
+    void (*destroy)(secpolicy_challenge_t *, void *),
+    bool (*verify)(const secpolicy_challenge_t *, const secpolicy_challenge_t *,
+                   void *),
+    void *ctx)
 {
-    if (policy) {
-        policy->rules.challenge.enable = true;
-        policy->rules.challenge.create = create;
-        policy->rules.challenge.destroy = destroy;
-        policy->rules.challenge.verify = verify;
-        policy->rules.challenge.solve = solve;
-        policy->rules.challenge.ctx = ctx;
+    if (policy && create && destroy && verify) {
+        policy->rules.challenge_create.enable = true;
+        policy->rules.challenge_create.create = create;
+        policy->rules.challenge_create.destroy = destroy;
+        policy->rules.challenge_create.verify = verify;
+        policy->rules.challenge_create.ctx = ctx;
+    }
+}
+
+void secpolicy_challenge_solve(secpolicy_t *policy,
+                               bool (*solve)(const secpolicy_challenge_t *,
+                                             secpolicy_challenge_t *, void *),
+                               void (*destroy)(secpolicy_challenge_t *, void *),
+                               void *ctx)
+{
+    if (policy && solve && destroy) {
+        policy->rules.challenge_solve.enable = true;
+        policy->rules.challenge_solve.solve = solve;
+        policy->rules.challenge_solve.destroy = destroy;
+        policy->rules.challenge_solve.ctx = ctx;
     }
 }
 
@@ -146,9 +164,18 @@ int secpolicy_apply(secpolicy_t *policy, int sock, secpolicy_result_t *result)
     int ret = -1;
     secpolicy_peer_t peer = {0};
     secpolicy_result_t local_result = 0;
+    challenge_create_ctx_t challenge_create_ctx = {0};
+    challenge_solve_ctx_t challenge_solve_ctx = {0};
+    comms_t *comms = NULL;
 
     if (!policy) {
         errno = EINVAL;
+        goto done;
+    }
+
+    comms = comms_create(sock);
+    if (!comms) {
+        errno = ENOMEM;
         goto done;
     }
 
@@ -188,7 +215,7 @@ int secpolicy_apply(secpolicy_t *policy, int sock, secpolicy_result_t *result)
     }
 
     if (policy->rules.perms.enable) {
-        if ((policy->rules.perms.mode & 0777) != (peer.perms & 0777)) {
+        if (policy->rules.perms.mode != peer.perms) {
             local_result |= SECPOLICY_RESULT_PERMS;
         }
     }
@@ -199,191 +226,39 @@ int secpolicy_apply(secpolicy_t *policy, int sock, secpolicy_result_t *result)
         }
     }
 
-    if (policy->rules.challenge.enable) {
-        secpolicy_challenge_t challenge;
-        secpolicy_challenge_t response;
-        bool sent_challenge = false;
-        bool sent_response = false;
-        bool received_request = false;
-        bool solved = false;
-        for (;;) {
-            fd_set rfds;
-            fd_set wfds;
-            fd_set efds;
-            struct timeval tv;
-            int select_ret;
-
-            FD_ZERO(&rfds);
-            FD_ZERO(&wfds);
-            FD_ZERO(&efds);
-
-            FD_SET(sock, &rfds);
-            FD_SET(sock, &wfds);
-            FD_SET(sock, &efds);
-
-            tv.tv_sec = 1;
-            tv.tv_usec = 0;
-
-            select_ret = select(sock + 1, &rfds, &wfds, &efds, &tv);
-            if (select_ret == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                break;
-            }
-            else if (select_ret == 0) {
-                break;
-            }
-            if (FD_ISSET(sock, &efds)) {
-                break;
-            }
-            if (FD_ISSET(sock, &wfds)) {
-                if (!sent_challenge && policy->rules.challenge.create) {
-                    message_t message;
-                    ssize_t bytes;
-
-                    if (!policy->rules.challenge.create(
-                            &challenge, policy->rules.challenge.ctx)) {
-                        goto done;
-                    }
-
-                    message.type = MESSAGE_TYPE_CHALLENGE_REQUEST;
-                    message.version = PROTO_VERSION;
-                    message.payload_size = challenge.size;
-
-                    bytes = write(sock, &message, sizeof(message));
-                    if (bytes == -1 || (size_t)bytes != sizeof(message)) {
-                        break;
-                    }
-
-                    bytes = write(sock, challenge.data, challenge.size);
-                    if (bytes == -1 || (size_t)bytes != challenge.size) {
-                        break;
-                    }
-
-                    sent_challenge = true;
-                }
-
-                if (!sent_response && received_request) {
-                    message_t message;
-                    ssize_t bytes;
-
-                    message.type = MESSAGE_TYPE_CHALLENGE_RESPONSE;
-                    message.version = PROTO_VERSION;
-                    message.payload_size = response.size;
-
-                    bytes = write(sock, &message, sizeof(message));
-                    if (bytes == -1 || (size_t)bytes != sizeof(message)) {
-                        break;
-                    }
-
-                    bytes = write(sock, response.data, response.size);
-                    if (bytes == -1 || (size_t)bytes != response.size) {
-                        break;
-                    }
-
-                    sent_response = true;
-                    solved = true;
-                    break;
-                }
-            }
-            if (FD_ISSET(sock, &rfds)) {
-                message_t message;
-                ssize_t bytes;
-
-                bytes = read(sock, &message, sizeof(message));
-                if (bytes == -1 || (size_t)bytes != sizeof(message)) {
-                    break;
-                }
-                if (message.version != PROTO_VERSION) {
-                    break;
-                }
-                if (message.type == MESSAGE_TYPE_CHALLENGE_RESPONSE) {
-                    secpolicy_challenge_t message_response;
-
-                    do {
-                        if (message.payload_size == 0) {
-                            break;
-                        }
-
-                        message_response.size = message.payload_size;
-                        message_response.data = malloc(message.payload_size);
-                        if (!message_response.data) {
-                            break;
-                        }
-
-                        bytes = read(sock, message_response.data,
-                                     message.payload_size);
-                        if (bytes == -1 ||
-                            (size_t)bytes != message.payload_size) {
-                            break;
-                        }
-
-                        if (!solved) {
-                            if (!policy->rules.challenge.verify(
-                                    &challenge, &message_response,
-                                    policy->rules.challenge.ctx)) {
-                                break;
-                            }
-
-                            solved = true;
-                        }
-                    } while (0);
-
-                    free(response.data);
-
-                    if (solved) {
-                        break;
-                    }
-                }
-                else if (message.type == MESSAGE_TYPE_CHALLENGE_REQUEST) {
-                    secpolicy_challenge_t request_challenge;
-
-                    do {
-                        if (message.payload_size == 0) {
-                            break;
-                        }
-
-                        request_challenge.size = message.payload_size;
-                        request_challenge.data = malloc(message.payload_size);
-                        if (!request_challenge.data) {
-                            break;
-                        }
-
-                        bytes = read(sock, request_challenge.data,
-                                     message.payload_size);
-                        if (bytes == -1 ||
-                            (size_t)bytes != message.payload_size) {
-                            break;
-                        }
-
-                        if (!received_request) {
-                            if (!policy->rules.challenge.solve(
-                                    &request_challenge, &response,
-                                    policy->rules.challenge.ctx)) {
-                                break;
-                            }
-                            received_request = true;
-                        }
-                    } while (0);
-
-                    free(request_challenge.data);
-
-                    if (!received_request) {
-                        break;
-                    }
-                }
-            }
+    if (policy->rules.challenge_create.enable) {
+        if (!policy->rules.challenge_create.create(
+                &challenge_create_ctx.challenge,
+                policy->rules.challenge_create.ctx)) {
+            goto done;
         }
 
-        if (policy->rules.challenge.destroy) {
-            policy->rules.challenge.destroy(&challenge,
-                                            policy->rules.challenge.ctx);
+        if (!challenge_send(sock, &challenge_create_ctx.challenge)) {
+            goto done;
         }
 
-        free(response.data);
+        challenge_create_ctx.verify = policy->rules.challenge_create.verify;
+        challenge_create_ctx.ctx = policy->rules.challenge_create.ctx;
 
-        if (!solved) {
+        comms_on_challenge_response(comms, challenge_response,
+                                    &challenge_create_ctx);
+    }
+
+    if (policy->rules.challenge_solve.enable) {
+        challenge_solve_ctx.solve = policy->rules.challenge_solve.solve;
+        challenge_solve_ctx.destroy = policy->rules.challenge_solve.destroy;
+        challenge_solve_ctx.ctx = policy->rules.challenge_solve.ctx;
+
+        comms_on_challenge_request(comms, challenge_request,
+                                   &challenge_solve_ctx);
+    }
+
+    if (!comms_wait(comms, 1)) {
+        goto done;
+    }
+
+    if (policy->rules.challenge_create.enable) {
+        if (!challenge_create_ctx.result) {
             local_result |= SECPOLICY_RESULT_CHALLENGE;
         }
     }
@@ -393,5 +268,7 @@ int secpolicy_apply(secpolicy_t *policy, int sock, secpolicy_result_t *result)
     }
     ret = 0;
 done:
+    comms_destroy(comms);
+
     return ret;
 }

@@ -52,6 +52,7 @@ TEST_CASE("Program Test")
                 []() {
                     ClientSocket client;
                     client.open("test.sock");
+                    ::pause();
                 });
 
             REQUIRE(ret == 0);

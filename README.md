@@ -8,7 +8,7 @@ Local sockets (or UNIX domain sockets) are used for interprocess communication b
 - Peer UID/GID verification
 - Peer User and Group name verification
 - Peer Program name verification
-- Token-based/Challenge-based verification (experimental, API may change)
+- Token-based/Challenge-based verification
 
 ## Getting Started
 

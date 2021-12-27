@@ -13,6 +13,9 @@ bool peer_init(int sock, secpolicy_peer_t *peer)
 {
     bool ret = false;
 
+    // Sock
+    peer->sock = sock;
+
     // Creds
     {
         struct ucred cred;
@@ -53,7 +56,7 @@ bool peer_init(int sock, secpolicy_peer_t *peer)
             if (stat(addr.sun_path, &statbuf)) {
                 goto done;
             }
-            peer->perms = statbuf.st_mode;
+            peer->perms = (statbuf.st_mode & 0777);
         }
     }
 

@@ -47,7 +47,7 @@ static int _create_server(const char *path)
 
     return sock;
 }
-#include <stdio.h>
+
 static bool _create_challenge(secpolicy_challenge_t *challenge, void *ctx)
 {
     challenge->data = malloc(10);
@@ -94,8 +94,8 @@ int main()
         die("secpolicy_create");
     }
 
-    secpolicy_challenge(policy, _create_challenge, _destroy_challenge,
-                        _verify_challenge, NULL, NULL);
+    secpolicy_challenge_create(policy, _create_challenge, _destroy_challenge,
+                               _verify_challenge, NULL);
 
     client = accept(sock, NULL, NULL);
     if (client == -1) {

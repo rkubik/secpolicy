@@ -10,33 +10,22 @@
 
 #include <iostream>
 
-namespace {
-bool verify_connection(const secpolicy_peer_t *peer, void *ctx)
-{
-    bool *ret = static_cast<bool *>(ctx);
-    return *ret;
-}
-
-} // namespace
-
-TEST_CASE("Peer Test")
+TEST_CASE("Peer Creds Test")
 {
     SecPolicy policy{secpolicy_create()};
     ServerSocket server;
 
     REQUIRE(server.open("test.sock"));
 
-    for (auto &&[ret, expected_result] : {
-             std::tuple<bool, secpolicy_result_t>{true, 0},
-             std::tuple<bool, secpolicy_result_t>{false, SECPOLICY_RESULT_CB},
+    for (auto &&[creds, expected_result] : {
+             std::tuple<std::string, secpolicy_result_t>{
+                 "docker-default (enforce)", SECPOLICY_RESULT_PEER_CREDS},
+             std::tuple<std::string, secpolicy_result_t>{"", 0},
          }) {
         DYNAMIC_SECTION("Policy should return " << std::hex << expected_result
-                                                << " when callback returns "
-                                                << (ret ? "true" : "false"))
+                                                << " for creds " << creds)
         {
-            bool cb_ret = ret;
-            secpolicy_cb(policy.get(), verify_connection,
-                         static_cast<void *>(&cb_ret));
+            secpolicy_peer_creds(policy.get(), creds.c_str());
 
             int ret;
             secpolicy_result_t result;
