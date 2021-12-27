@@ -86,6 +86,8 @@ int main()
     secpolicy_program(policy, "/usr/bin/socat");
     /* Client should pass additional security checks */
     secpolicy_cb(policy, _verify_peer, NULL);
+    /* Client is not running with LSM credentials */
+    secpolicy_peer_creds(policy, "unconfined");
 
     client = accept(sock, NULL, NULL);
     if (client == -1) {
