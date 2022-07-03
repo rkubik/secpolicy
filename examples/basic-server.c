@@ -74,6 +74,7 @@ int main()
         die("secpolicy_create");
     }
 
+    /* Define a policy for connecting peers */
     secpolicy_rule_uid(policy, 1000);
     secpolicy_rule_gid(policy, 1000);
     secpolicy_rule_user(policy, "admin");

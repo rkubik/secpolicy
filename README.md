@@ -16,7 +16,7 @@ Local sockets (or UNIX domain sockets) are used for interprocess communication b
 
 Dependencies:
 
-- cmake (>=2.8)
+- cmake (>=3)
 - gcc
 - C++17 (for tests)
 
@@ -35,7 +35,8 @@ The following steps illustrate how to integrate this library into your existing 
     ```
     secpolicy_t *policy = secpolicy_create();
     /* Peer process must be running with uid 1000 and gid 1000 */
-    secpolicy_peer(policy, 1000, 1000);
+    secpolicy_rule_uid(policy, 1000);
+    secpolicy_rule_gid(policy, 1000);
     ```
 
 1. Server-side: When a peer connects, apply the policy and take action.
@@ -64,7 +65,7 @@ The following steps illustrate how to integrate this library into your existing 
     ```
     secpolicy_t *policy = secpolicy_create();
     /* Check server process executable */
-    secpolicy_program("/opt/organization/bin/prog");
+    secpolicy_rule_program("/opt/organization/bin/prog");
     ```
 
 1. Client-side: When connected, apply the policy and take action.
