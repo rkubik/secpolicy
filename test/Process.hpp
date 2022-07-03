@@ -19,8 +19,7 @@ class Process final {
         } else {
             parent();
             ::kill(pid, 9);
-            int wstatus;
-            ::waitpid(pid, &wstatus, 0);
+            ::waitpid(pid, nullptr, 0);
         }
     }
 };

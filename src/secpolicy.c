@@ -1,48 +1,51 @@
 #include "secpolicy/secpolicy.h"
 
 #include "challenge.h"
-#include "comms.h"
 #include "peer.h"
+#include "proto.h"
 #include "strlcpy.h"
 
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 typedef struct {
     struct {
         bool enable;
-        uid_t uid;
-        gid_t gid;
-    } peer;
+        uid_t value;
+    } uid;
     struct {
         bool enable;
-        char user[USER_MAX];
-        char group[USER_MAX];
-    } peer_name;
+        gid_t value;
+    } gid;
     struct {
         bool enable;
-        char creds[CREDS_MAX];
-    } peer_creds;
+        char name[USER_MAX];
+    } user;
+    struct {
+        bool enable;
+        char name[USER_MAX];
+    } group;
+    struct {
+        bool enable;
+        char name[CREDS_MAX];
+    } creds;
     struct {
         bool enable;
         bool (*create)(secpolicy_challenge_t *, void *);
-        void (*destroy)(secpolicy_challenge_t *, void *);
         bool (*verify)(const secpolicy_challenge_t *,
                        const secpolicy_challenge_t *, void *);
         bool (*solve)(const secpolicy_challenge_t *, secpolicy_challenge_t *,
                       void *);
         void *ctx;
-    } challenge_create;
+    } challenge_send;
     struct {
         bool enable;
         bool (*solve)(const secpolicy_challenge_t *, secpolicy_challenge_t *,
                       void *);
-        void (*destroy)(secpolicy_challenge_t *, void *);
         void *ctx;
-    } challenge_solve;
+    } challenge_receive;
     struct {
         bool enable;
         char path[PATH_MAX];
@@ -53,14 +56,16 @@ typedef struct {
     } perms;
     struct {
         bool enable;
-        bool (*verify)(const secpolicy_peer_t *, void *);
+        bool (*func)(const secpolicy_peer_t *, void *);
         void *ctx;
-    } cb;
+    } callback;
 } policy_rules_t;
 
 typedef struct secpolicy {
     policy_rules_t rules;
 } secpolicy_t;
+
+static bool _challenge(secpolicy_t *policy, int sock, bool *result);
 
 secpolicy_t *secpolicy_create(void)
 {
@@ -72,7 +77,7 @@ void secpolicy_destroy(secpolicy_t *policy)
     free(policy);
 }
 
-void secpolicy_perms(secpolicy_t *policy, mode_t perms)
+void secpolicy_rule_perms(secpolicy_t *policy, mode_t perms)
 {
     if (policy) {
         policy->rules.perms.enable = true;
@@ -80,67 +85,77 @@ void secpolicy_perms(secpolicy_t *policy, mode_t perms)
     }
 }
 
-void secpolicy_challenge_create(
+void secpolicy_rule_challenge_send(
     secpolicy_t *policy, bool (*create)(secpolicy_challenge_t *, void *),
-    void (*destroy)(secpolicy_challenge_t *, void *),
     bool (*verify)(const secpolicy_challenge_t *, const secpolicy_challenge_t *,
                    void *),
     void *ctx)
 {
-    if (policy && create && destroy && verify) {
-        policy->rules.challenge_create.enable = true;
-        policy->rules.challenge_create.create = create;
-        policy->rules.challenge_create.destroy = destroy;
-        policy->rules.challenge_create.verify = verify;
-        policy->rules.challenge_create.ctx = ctx;
+    if (policy && create && verify) {
+        policy->rules.challenge_send.enable = true;
+        policy->rules.challenge_send.create = create;
+        policy->rules.challenge_send.verify = verify;
+        policy->rules.challenge_send.ctx = ctx;
     }
 }
 
-void secpolicy_challenge_solve(secpolicy_t *policy,
-                               bool (*solve)(const secpolicy_challenge_t *,
-                                             secpolicy_challenge_t *, void *),
-                               void (*destroy)(secpolicy_challenge_t *, void *),
-                               void *ctx)
+void secpolicy_rule_challenge_receive(
+    secpolicy_t *policy,
+    bool (*solve)(const secpolicy_challenge_t *, secpolicy_challenge_t *,
+                  void *),
+    void *ctx)
 {
-    if (policy && solve && destroy) {
-        policy->rules.challenge_solve.enable = true;
-        policy->rules.challenge_solve.solve = solve;
-        policy->rules.challenge_solve.destroy = destroy;
-        policy->rules.challenge_solve.ctx = ctx;
+    if (policy && solve) {
+        policy->rules.challenge_receive.enable = true;
+        policy->rules.challenge_receive.solve = solve;
+        policy->rules.challenge_receive.ctx = ctx;
     }
 }
 
-void secpolicy_peer(secpolicy_t *policy, uid_t uid, gid_t gid)
+void secpolicy_rule_uid(secpolicy_t *policy, uid_t uid)
 {
     if (policy) {
-        policy->rules.peer.enable = true;
-        policy->rules.peer.uid = uid;
-        policy->rules.peer.gid = gid;
+        policy->rules.uid.enable = true;
+        policy->rules.uid.value = uid;
     }
 }
 
-void secpolicy_peer_name(secpolicy_t *policy, const char *user,
-                         const char *group)
+void secpolicy_rule_gid(secpolicy_t *policy, gid_t gid)
 {
-    if (policy && user && group) {
-        policy->rules.peer_name.enable = true;
-        safe_strcpy(policy->rules.peer_name.user,
-                    sizeof(policy->rules.peer_name.user), user);
-        safe_strcpy(policy->rules.peer_name.group,
-                    sizeof(policy->rules.peer_name.group), group);
+    if (policy) {
+        policy->rules.gid.enable = true;
+        policy->rules.gid.value = gid;
     }
 }
 
-void secpolicy_peer_creds(secpolicy_t *policy, const char *creds)
+void secpolicy_rule_user(secpolicy_t *policy, const char *user)
+{
+    if (policy && user) {
+        policy->rules.user.enable = true;
+        safe_strcpy(policy->rules.user.name, sizeof(policy->rules.user.name),
+                    user);
+    }
+}
+
+void secpolicy_rule_group(secpolicy_t *policy, const char *group)
+{
+    if (policy && group) {
+        policy->rules.group.enable = true;
+        safe_strcpy(policy->rules.group.name, sizeof(policy->rules.group.name),
+                    group);
+    }
+}
+
+void secpolicy_rule_creds(secpolicy_t *policy, const char *creds)
 {
     if (policy && creds) {
-        policy->rules.peer_creds.enable = true;
-        safe_strcpy(policy->rules.peer_creds.creds,
-                    sizeof(policy->rules.peer_creds.creds), creds);
+        policy->rules.creds.enable = true;
+        safe_strcpy(policy->rules.creds.name, sizeof(policy->rules.creds.name),
+                    creds);
     }
 }
 
-void secpolicy_program(secpolicy_t *policy, const char *program)
+void secpolicy_rule_program(secpolicy_t *policy, const char *program)
 {
     if (policy && program) {
         policy->rules.program.enable = true;
@@ -149,13 +164,14 @@ void secpolicy_program(secpolicy_t *policy, const char *program)
     }
 }
 
-void secpolicy_cb(secpolicy_t *policy,
-                  bool (*verify)(const secpolicy_peer_t *, void *), void *ctx)
+void secpolicy_rule_callback(secpolicy_t *policy,
+                             bool (*func)(const secpolicy_peer_t *, void *),
+                             void *ctx)
 {
-    if (policy && verify) {
-        policy->rules.cb.enable = true;
-        policy->rules.cb.verify = verify;
-        policy->rules.cb.ctx = ctx;
+    if (policy && func) {
+        policy->rules.callback.enable = true;
+        policy->rules.callback.func = func;
+        policy->rules.callback.ctx = ctx;
     }
 }
 
@@ -164,18 +180,10 @@ int secpolicy_apply(secpolicy_t *policy, int sock, secpolicy_result_t *result)
     int ret = -1;
     secpolicy_peer_t peer = {0};
     secpolicy_result_t local_result = 0;
-    challenge_create_ctx_t challenge_create_ctx = {0};
-    challenge_solve_ctx_t challenge_solve_ctx = {0};
-    comms_t *comms = NULL;
+    bool challenge_result;
 
     if (!policy) {
         errno = EINVAL;
-        goto done;
-    }
-
-    comms = comms_create(sock);
-    if (!comms) {
-        errno = ENOMEM;
         goto done;
     }
 
@@ -184,32 +192,38 @@ int secpolicy_apply(secpolicy_t *policy, int sock, secpolicy_result_t *result)
         goto done;
     }
 
-    if (policy->rules.peer.enable) {
-        if (policy->rules.peer.uid != peer.uid ||
-            policy->rules.peer.gid != peer.gid) {
-            local_result |= SECPOLICY_RESULT_PEER;
+    if (policy->rules.uid.enable) {
+        if (policy->rules.uid.value != peer.uid) {
+            local_result |= SECPOLICY_RESULT_UID;
         }
     }
 
-    if (policy->rules.peer_name.enable) {
-        if (strncmp(policy->rules.peer_name.user, peer.user,
-                    sizeof(peer.user)) ||
-            strncmp(policy->rules.peer_name.group, peer.group,
-                    sizeof(peer.group))) {
-            local_result |= SECPOLICY_RESULT_PEER_NAME;
+    if (policy->rules.gid.enable) {
+        if (policy->rules.gid.value != peer.gid) {
+            local_result |= SECPOLICY_RESULT_GID;
         }
     }
 
-    if (policy->rules.peer_creds.enable) {
-        if (strncmp(policy->rules.peer_creds.creds, peer.creds,
-                    sizeof(peer.creds))) {
-            local_result |= SECPOLICY_RESULT_PEER_CREDS;
+    if (policy->rules.user.enable) {
+        if (strcmp(policy->rules.user.name, peer.user)) {
+            local_result |= SECPOLICY_RESULT_USER;
+        }
+    }
+
+    if (policy->rules.group.enable) {
+        if (strcmp(policy->rules.group.name, peer.group)) {
+            local_result |= SECPOLICY_RESULT_GROUP;
+        }
+    }
+
+    if (policy->rules.creds.enable) {
+        if (strcmp(policy->rules.creds.name, peer.creds)) {
+            local_result |= SECPOLICY_RESULT_CREDS;
         }
     }
 
     if (policy->rules.program.enable) {
-        if (strncmp(policy->rules.program.path, peer.program,
-                    sizeof(peer.program))) {
+        if (strcmp(policy->rules.program.path, peer.program)) {
             local_result |= SECPOLICY_RESULT_PROGRAM;
         }
     }
@@ -220,55 +234,82 @@ int secpolicy_apply(secpolicy_t *policy, int sock, secpolicy_result_t *result)
         }
     }
 
-    if (policy->rules.cb.enable) {
-        if (!policy->rules.cb.verify(&peer, policy->rules.cb.ctx)) {
-            local_result |= SECPOLICY_RESULT_CB;
+    if (policy->rules.callback.enable) {
+        if (!policy->rules.callback.func(&peer, policy->rules.callback.ctx)) {
+            local_result |= SECPOLICY_RESULT_CALLBACK;
         }
     }
 
-    if (policy->rules.challenge_create.enable) {
-        if (!policy->rules.challenge_create.create(
-                &challenge_create_ctx.challenge,
-                policy->rules.challenge_create.ctx)) {
-            goto done;
-        }
-
-        if (!challenge_send(sock, &challenge_create_ctx.challenge)) {
-            goto done;
-        }
-
-        challenge_create_ctx.verify = policy->rules.challenge_create.verify;
-        challenge_create_ctx.ctx = policy->rules.challenge_create.ctx;
-
-        comms_on_challenge_response(comms, challenge_response,
-                                    &challenge_create_ctx);
-    }
-
-    if (policy->rules.challenge_solve.enable) {
-        challenge_solve_ctx.solve = policy->rules.challenge_solve.solve;
-        challenge_solve_ctx.destroy = policy->rules.challenge_solve.destroy;
-        challenge_solve_ctx.ctx = policy->rules.challenge_solve.ctx;
-
-        comms_on_challenge_request(comms, challenge_request,
-                                   &challenge_solve_ctx);
-    }
-
-    if (!comms_wait(comms, 1)) {
+    if (!_challenge(policy, sock, &challenge_result)) {
         goto done;
     }
 
-    if (policy->rules.challenge_create.enable) {
-        if (!challenge_create_ctx.result) {
-            local_result |= SECPOLICY_RESULT_CHALLENGE;
-        }
+    if (!challenge_result) {
+        local_result |= SECPOLICY_RESULT_CHALLENGE;
     }
 
     if (result) {
         *result = local_result;
     }
+
     ret = 0;
 done:
-    comms_destroy(comms);
+    return ret;
+}
+
+static bool _challenge(secpolicy_t *policy, int sock, bool *result)
+{
+    bool ret = false;
+    bool local_result = true;
+    secpolicy_challenge_t send_challenge = {0};
+    secpolicy_challenge_t send_answer = {0};
+    secpolicy_challenge_t receive_challenge = {0};
+    secpolicy_challenge_t receive_answer = {0};
+
+    if (policy->rules.challenge_send.enable) {
+        if (!policy->rules.challenge_send.create(
+                &send_challenge, policy->rules.challenge_send.ctx)) {
+            goto done;
+        }
+
+        if (!challenge_send_request(sock, &send_challenge)) {
+            goto done;
+        }
+    }
+
+    if (policy->rules.challenge_receive.enable) {
+        if (!challenge_receive_request(sock, &receive_challenge)) {
+            goto done;
+        }
+
+        if (!policy->rules.challenge_receive.solve(
+                &receive_challenge, &receive_answer,
+                policy->rules.challenge_receive.ctx)) {
+            goto done;
+        }
+
+        if (!challenge_send_response(sock, &receive_answer)) {
+            goto done;
+        }
+    }
+
+    if (policy->rules.challenge_send.enable) {
+        if (!challenge_receive_response(sock, &send_answer)) {
+            goto done;
+        }
+
+        local_result = policy->rules.challenge_send.verify(
+            &send_challenge, &send_answer, policy->rules.challenge_send.ctx);
+    }
+
+    ret = true;
+done:
+    *result = local_result;
+
+    secpolicy_challenge_free(&send_challenge);
+    secpolicy_challenge_free(&send_answer);
+    secpolicy_challenge_free(&receive_challenge);
+    secpolicy_challenge_free(&receive_answer);
 
     return ret;
 }

@@ -10,9 +10,8 @@ set( LIBSOURCES
     ${PROJECT_SOURCE_DIR}/src/proc.c
     ${PROJECT_SOURCE_DIR}/src/user.c
     ${PROJECT_SOURCE_DIR}/src/peer.c
-    ${PROJECT_SOURCE_DIR}/src/strlcpy.c
     ${PROJECT_SOURCE_DIR}/src/challenge.c
-    ${PROJECT_SOURCE_DIR}/src/comms.c
+    ${PROJECT_SOURCE_DIR}/src/strlcpy.c
 )
 
 set( CMAKE_C_FLAGS "-ggdb -Wall" )

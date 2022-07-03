@@ -10,28 +10,21 @@
 
 #include <iostream>
 
-TEST_CASE("Peer Test")
+TEST_CASE("Gid Test")
 {
     SecPolicy policy{secpolicy_create()};
     ServerSocket server;
 
     REQUIRE(server.open("test.sock"));
 
-    for (auto &&[uid, gid, expected_result] : {
-             std::tuple<uid_t, gid_t, secpolicy_result_t>{
-                 0, 0, SECPOLICY_RESULT_PEER},
-             std::tuple<uid_t, gid_t, secpolicy_result_t>{
-                 getuid(), 0, SECPOLICY_RESULT_PEER},
-             std::tuple<uid_t, gid_t, secpolicy_result_t>{
-                 0, getgid(), SECPOLICY_RESULT_PEER},
-             std::tuple<uid_t, gid_t, secpolicy_result_t>{getuid(), getgid(),
-                                                          0},
-         }) {
+    for (auto &&[gid, expected_result] :
+         {std::tuple<gid_t, secpolicy_result_t>{getgid() + 1,
+                                                SECPOLICY_RESULT_GID},
+          std::tuple<gid_t, secpolicy_result_t>{getgid(), 0}}) {
         DYNAMIC_SECTION("Policy should return " << std::hex << expected_result
-                                                << " for uid " << uid
-                                                << " and gid " << gid)
+                                                << " for gid " << gid)
         {
-            secpolicy_peer(policy.get(), uid, gid);
+            secpolicy_rule_gid(policy.get(), gid);
 
             int ret;
             secpolicy_result_t result;

@@ -42,25 +42,29 @@ static bool _solve_challenge(const secpolicy_challenge_t *challenge,
                              secpolicy_challenge_t *response, void *ctx)
 {
     bool ret = false;
+    const uint8_t *challenge_data = secpolicy_challenge_data(challenge);
+    size_t challenge_size = secpolicy_challenge_size(challenge);
+    uint8_t *response_data = NULL;
+    size_t response_size = challenge_size;
 
-    response->size = challenge->size;
-    response->data = malloc(challenge->size);
-    if (!response->data) {
+    response_data = malloc(secpolicy_challenge_size(challenge));
+    if (!response_data) {
         goto done;
     }
 
-    for (size_t i = 0; i < challenge->size; i++) {
-        response->data[i] = (challenge->data[i] << 1);
+    for (size_t i = 0; i < challenge_size; i++) {
+        response_data[i] = (challenge_data[i] << 1);
+    }
+
+    if (!secpolicy_challenge_set_data(response, response_data, response_size)) {
+        goto done;
     }
 
     ret = true;
 done:
-    return ret;
-}
+    free(response_data);
 
-static void _free_challenge(secpolicy_challenge_t *challenge, void *ctx)
-{
-    free(challenge->data);
+    return ret;
 }
 
 int main()
@@ -76,18 +80,17 @@ int main()
         die("secpolicy_create");
     }
 
-    secpolicy_challenge_solve(policy, _solve_challenge, _free_challenge, NULL);
+    secpolicy_rule_challenge_receive(policy, _solve_challenge, NULL);
 
     if (secpolicy_apply(policy, sock, &result)) {
         die("secpolicy_apply");
     }
     if (result != 0) {
         fprintf(stderr, "Security policy failed: 0x%" PRIx64 "\n", result);
-        (void)close(sock);
-        exit(1);
     }
-
-    printf("Server verified: %d\n", sock);
+    else {
+        printf("Server verified: %d\n", sock);
+    }
 
     (void)close(sock);
 

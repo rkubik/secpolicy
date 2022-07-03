@@ -44,56 +44,23 @@ std::string getuser()
 
     return pw->pw_name;
 }
-
-std::string getgroup()
-{
-    char *strbuf = NULL;
-    struct group grbuf;
-    struct group *gr = NULL;
-    long val;
-    size_t strbuflen;
-
-    val = sysconf(_SC_GETGR_R_SIZE_MAX);
-    if (val < 0) {
-        return {};
-    }
-    strbuflen = val;
-
-    strbuf = static_cast<char *>(malloc(strbuflen));
-    if (!strbuf) {
-        return {};
-    }
-
-    if (getgrgid_r(getgid(), &grbuf, strbuf, strbuflen, &gr) != 0 ||
-        gr == NULL) {
-        return {};
-    }
-
-    return gr->gr_name;
-}
 } // namespace
 
-TEST_CASE("Peer Name Test")
+TEST_CASE("User Test")
 {
     SecPolicy policy{secpolicy_create()};
     ServerSocket server;
 
     REQUIRE(server.open("test.sock"));
 
-    for (auto &&[user, group, expected_result] :
-         {std::tuple<std::string, std::string, secpolicy_result_t>{
-              "!@#$%^&*()", "!@#$%^&*()", SECPOLICY_RESULT_PEER_NAME},
-          std::tuple<std::string, std::string, secpolicy_result_t>{
-              getuser(), "!@#$%^&*()", SECPOLICY_RESULT_PEER_NAME},
-          std::tuple<std::string, std::string, secpolicy_result_t>{
-              "!@#$%^&*()", getgroup(), SECPOLICY_RESULT_PEER_NAME},
-          std::tuple<std::string, std::string, secpolicy_result_t>{
-              getuser(), getgroup(), 0}}) {
+    for (auto &&[user, expected_result] :
+         {std::tuple<std::string, secpolicy_result_t>{"!@#$%^&*()",
+                                                      SECPOLICY_RESULT_USER},
+          std::tuple<std::string, secpolicy_result_t>{getuser(), 0}}) {
         DYNAMIC_SECTION("Policy should return " << std::hex << expected_result
-                                                << " for user " << user
-                                                << " and group " << group)
+                                                << " for user " << user)
         {
-            secpolicy_peer_name(policy.get(), user.c_str(), group.c_str());
+            secpolicy_rule_user(policy.get(), user.c_str());
 
             int ret;
             secpolicy_result_t result;

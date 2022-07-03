@@ -74,3 +74,49 @@ bool peer_init(int sock, secpolicy_peer_t *peer)
 done:
     return ret;
 }
+
+
+int secpolicy_peer_sock(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->sock : -1);
+}
+
+pid_t secpolicy_peer_pid(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->pid : 0);
+}
+
+const char *secpolicy_peer_program(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->program : NULL);
+}
+
+uid_t secpolicy_peer_uid(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->uid : 0);
+}
+
+gid_t secpolicy_peer_gid(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->gid : 0);
+}
+
+const char *secpolicy_peer_user(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->user : NULL);
+}
+
+const char *secpolicy_peer_group(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->group : NULL);
+}
+
+mode_t secpolicy_peer_perms(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->perms : 0);
+}
+
+const char *secpolicy_peer_creds(const secpolicy_peer_t *peer)
+{
+    return (peer ? peer->creds : NULL);
+}

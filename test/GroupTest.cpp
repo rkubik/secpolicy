@@ -9,38 +9,58 @@
 #include "secpolicy/secpolicy.h"
 
 #include <iostream>
-#include <sstream>
+
+#include <grp.h>
+#include <pwd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 namespace {
-std::string getexe()
+std::string getgroup()
 {
-    char exe[PATH_MAX];
-    std::stringstream ss;
-    ss << "/proc/" << getpid() << "/exe";
-    ssize_t size = readlink(ss.str().c_str(), exe, sizeof(exe) - 1);
-    if (size == -1) {
+    char *strbuf = NULL;
+    struct group grbuf;
+    struct group *gr = NULL;
+    long val;
+    size_t strbuflen;
+
+    val = sysconf(_SC_GETGR_R_SIZE_MAX);
+    if (val < 0) {
         return {};
     }
-    return exe;
+    strbuflen = val;
+
+    strbuf = static_cast<char *>(malloc(strbuflen));
+    if (!strbuf) {
+        return {};
+    }
+
+    if (getgrgid_r(getgid(), &grbuf, strbuf, strbuflen, &gr) != 0 ||
+        gr == NULL) {
+        return {};
+    }
+
+    return gr->gr_name;
 }
 } // namespace
 
-TEST_CASE("Program Test")
+TEST_CASE("Group Test")
 {
     SecPolicy policy{secpolicy_create()};
     ServerSocket server;
 
     REQUIRE(server.open("test.sock"));
 
-    for (auto &&[program, expected_result] : {
-             std::tuple<std::string, secpolicy_result_t>{
-                 "!@#$%^&*()", SECPOLICY_RESULT_PROGRAM},
-             std::tuple<std::string, secpolicy_result_t>{getexe(), 0},
-         }) {
+    for (auto &&[group, expected_result] :
+         {std::tuple<std::string, secpolicy_result_t>{"!@#$%^&*()",
+                                                      SECPOLICY_RESULT_GROUP},
+          std::tuple<std::string, secpolicy_result_t>{getgroup(), 0}}) {
         DYNAMIC_SECTION("Policy should return " << std::hex << expected_result
-                                                << " for program " << program)
+                                                << " for group " << group)
         {
-            secpolicy_rule_program(policy.get(), program.c_str());
+            secpolicy_rule_group(policy.get(), group.c_str());
 
             int ret;
             secpolicy_result_t result;

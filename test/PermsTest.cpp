@@ -34,7 +34,7 @@ TEST_CASE("Perms Test")
                         << (policy_perms & 0777))
         {
             ::chmod("test.sock", file_perms);
-            secpolicy_perms(policy.get(), policy_perms);
+            secpolicy_rule_perms(policy.get(), policy_perms);
 
             int ret;
             secpolicy_result_t result;

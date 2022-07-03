@@ -14,17 +14,9 @@
 namespace {
 bool create_challenge(secpolicy_challenge_t *challenge, void *ctx)
 {
-    challenge->data = new uint8_t[10];
-    if (!challenge->data) {
-        return false;
-    }
-    challenge->size = 10;
-    return true;
-}
-
-void destroy_challenge(secpolicy_challenge_t *challenge, void *ctx)
-{
-    delete challenge->data;
+    const size_t size = 10;
+    uint8_t data[size] = {5};
+    return secpolicy_challenge_set_data(challenge, data, size);
 }
 
 bool verify_challenge(const secpolicy_challenge_t *challenge,
@@ -37,12 +29,9 @@ bool verify_challenge(const secpolicy_challenge_t *challenge,
 bool solve_challenge(const secpolicy_challenge_t *challenge,
                      secpolicy_challenge_t *response, void *ctx)
 {
-    response->data = new uint8_t[10];
-    if (!response->data) {
-        return false;
-    }
-    response->size = 10;
-    return true;
+    return secpolicy_challenge_set_data(response,
+                                        secpolicy_challenge_data(challenge),
+                                        secpolicy_challenge_size(challenge));
 }
 } // namespace
 
@@ -52,12 +41,11 @@ TEST_CASE("Challenge Test")
     ServerSocket server;
 
     REQUIRE(server.open("test.sock"));
-
+#if 0
     SECTION("Policy should fail when peer does not respond")
     {
-        secpolicy_challenge_create(policy.get(), create_challenge,
-                                   destroy_challenge, verify_challenge,
-                                   nullptr);
+        secpolicy_rule_challenge_send(policy.get(), create_challenge,
+                                      verify_challenge, nullptr);
 
         int ret;
         secpolicy_result_t result;
@@ -72,10 +60,9 @@ TEST_CASE("Challenge Test")
                 ::pause();
             });
 
-        REQUIRE(ret == 0);
-        REQUIRE(result == SECPOLICY_RESULT_CHALLENGE);
+        REQUIRE(ret == -1);
     }
-
+#endif
     for (auto &&[verify_ret, expected_result] : {
              std::tuple<bool, secpolicy_result_t>{false,
                                                   SECPOLICY_RESULT_CHALLENGE},
@@ -86,9 +73,9 @@ TEST_CASE("Challenge Test")
                         << (verify_ret ? "true" : "false"))
         {
             bool verify_ret_local = verify_ret;
-            secpolicy_challenge_create(policy.get(), create_challenge,
-                                       destroy_challenge, verify_challenge,
-                                       static_cast<void *>(&verify_ret_local));
+            secpolicy_rule_challenge_send(
+                policy.get(), create_challenge, verify_challenge,
+                static_cast<void *>(&verify_ret_local));
 
             int ret;
             secpolicy_result_t result;
@@ -101,8 +88,8 @@ TEST_CASE("Challenge Test")
                     SecPolicy policy{secpolicy_create()};
                     ClientSocket client;
                     client.open("test.sock");
-                    secpolicy_challenge_solve(policy.get(), solve_challenge,
-                                              destroy_challenge, nullptr);
+                    secpolicy_rule_challenge_receive(policy.get(),
+                                                     solve_challenge, nullptr);
                     secpolicy_apply(policy.get(), client.sock(), nullptr);
                 });
 
@@ -110,4 +97,38 @@ TEST_CASE("Challenge Test")
             REQUIRE(result == expected_result);
         }
     }
+#if 0
+    SECTION("Policy should succeed when both sides send a challenge")
+    {
+        bool verify_result = true;
+
+        secpolicy_rule_challenge_send(policy.get(), create_challenge,
+                                      verify_challenge,
+                                      static_cast<void *>(&verify_result));
+        secpolicy_rule_challenge_receive(policy.get(), solve_challenge,
+                                         nullptr);
+
+        int ret;
+        secpolicy_result_t result;
+        Process::spawn(
+            [&policy, &server, &ret, &result]() {
+                int client = server.accept();
+                ret = secpolicy_apply(policy.get(), client, &result);
+            },
+            [&verify_result]() {
+                SecPolicy policy{secpolicy_create()};
+                ClientSocket client;
+                client.open("test.sock");
+                secpolicy_rule_challenge_send(
+                    policy.get(), create_challenge, verify_challenge,
+                    static_cast<void *>(&verify_result));
+                secpolicy_rule_challenge_receive(policy.get(), solve_challenge,
+                                                 nullptr);
+                secpolicy_apply(policy.get(), client.sock(), nullptr);
+            });
+
+        REQUIRE(ret == 0);
+        REQUIRE(result == 0);
+    }
+#endif
 }

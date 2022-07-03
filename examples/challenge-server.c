@@ -50,14 +50,20 @@ static int _create_server(const char *path)
 
 static bool _create_challenge(secpolicy_challenge_t *challenge, void *ctx)
 {
-    challenge->data = malloc(10);
-    challenge->size = 10;
-    return (challenge->data != NULL);
-}
+    bool ret = false;
+    const size_t size = 10;
+    uint8_t data[size];
 
-static void _destroy_challenge(secpolicy_challenge_t *challenge, void *ctx)
-{
-    free(challenge->data);
+    memset(data, 5, size);
+
+    if (!secpolicy_challenge_set_data(challenge, data, size)) {
+        goto done;
+    }
+
+    ret = true;
+done:
+
+    return ret;
 }
 
 static bool _verify_challenge(const secpolicy_challenge_t *challenge,
@@ -65,12 +71,14 @@ static bool _verify_challenge(const secpolicy_challenge_t *challenge,
 {
     bool ret = false;
 
-    if (challenge->size != response->size) {
+    if (secpolicy_challenge_size(challenge) !=
+        secpolicy_challenge_size(response)) {
         goto done;
     }
 
-    for (size_t i = 0; i < challenge->size; i++) {
-        if (response->data[i] != (uint8_t)(challenge->data[i] << 1)) {
+    for (size_t i = 0; i < secpolicy_challenge_size(challenge); i++) {
+        if (secpolicy_challenge_data(response)[i] !=
+            (secpolicy_challenge_data(challenge)[i] << 1)) {
             goto done;
         }
     }
@@ -94,8 +102,8 @@ int main()
         die("secpolicy_create");
     }
 
-    secpolicy_challenge_create(policy, _create_challenge, _destroy_challenge,
-                               _verify_challenge, NULL);
+    secpolicy_rule_challenge_send(policy, _create_challenge, _verify_challenge,
+                                  NULL);
 
     client = accept(sock, NULL, NULL);
     if (client == -1) {
@@ -107,11 +115,10 @@ int main()
     }
     if (result != 0) {
         fprintf(stderr, "Security policy failed: 0x%" PRIx64 "\n", result);
-        (void)close(client);
-        exit(1);
     }
-
-    printf("Client verified: %d\n", client);
+    else {
+        printf("Client verified: %d\n", client);
+    }
 
     (void)close(client);
     (void)close(sock);

@@ -9,38 +9,23 @@
 #include "secpolicy/secpolicy.h"
 
 #include <iostream>
-#include <sstream>
 
-namespace {
-std::string getexe()
-{
-    char exe[PATH_MAX];
-    std::stringstream ss;
-    ss << "/proc/" << getpid() << "/exe";
-    ssize_t size = readlink(ss.str().c_str(), exe, sizeof(exe) - 1);
-    if (size == -1) {
-        return {};
-    }
-    return exe;
-}
-} // namespace
-
-TEST_CASE("Program Test")
+TEST_CASE("Peer Creds Test")
 {
     SecPolicy policy{secpolicy_create()};
     ServerSocket server;
 
     REQUIRE(server.open("test.sock"));
 
-    for (auto &&[program, expected_result] : {
+    for (auto &&[creds, expected_result] : {
              std::tuple<std::string, secpolicy_result_t>{
-                 "!@#$%^&*()", SECPOLICY_RESULT_PROGRAM},
-             std::tuple<std::string, secpolicy_result_t>{getexe(), 0},
+                 "docker-default (enforce)", SECPOLICY_RESULT_CREDS},
+             std::tuple<std::string, secpolicy_result_t>{"unconfined", 0},
          }) {
         DYNAMIC_SECTION("Policy should return " << std::hex << expected_result
-                                                << " for program " << program)
+                                                << " for creds " << creds)
         {
-            secpolicy_rule_program(policy.get(), program.c_str());
+            secpolicy_rule_creds(policy.get(), creds.c_str());
 
             int ret;
             secpolicy_result_t result;

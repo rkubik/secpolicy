@@ -10,22 +10,22 @@
 
 #include <iostream>
 
-TEST_CASE("Peer Creds Test")
+TEST_CASE("Uid Test")
 {
     SecPolicy policy{secpolicy_create()};
     ServerSocket server;
 
     REQUIRE(server.open("test.sock"));
 
-    for (auto &&[creds, expected_result] : {
-             std::tuple<std::string, secpolicy_result_t>{
-                 "docker-default (enforce)", SECPOLICY_RESULT_PEER_CREDS},
-             std::tuple<std::string, secpolicy_result_t>{"", 0},
+    for (auto &&[uid, expected_result] : {
+             std::tuple<uid_t, secpolicy_result_t>{getuid() + 1,
+                                                   SECPOLICY_RESULT_UID},
+             std::tuple<uid_t, secpolicy_result_t>{getuid(), 0},
          }) {
         DYNAMIC_SECTION("Policy should return " << std::hex << expected_result
-                                                << " for creds " << creds)
+                                                << " for uid " << uid)
         {
-            secpolicy_peer_creds(policy.get(), creds.c_str());
+            secpolicy_rule_uid(policy.get(), uid);
 
             int ret;
             secpolicy_result_t result;

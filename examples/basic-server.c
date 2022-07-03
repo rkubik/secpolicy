@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -50,16 +51,13 @@ static int _create_server(const char *path)
 
 static bool _verify_peer(const secpolicy_peer_t *peer, void *ctx)
 {
-    /**
-     * Additional user security checks.
-     *
-     * - Verify that the program executable is signed by a trusted vendor
-     */
-    printf("Security policy callback for <Client process=%s(%d) user=%s(%d) "
-           "group=%s(%d) perms=%3o creds=%s>\n",
-           peer->program, peer->pid, peer->user, peer->uid, peer->group,
-           peer->gid, peer->perms, peer->creds);
-    return true;
+    struct statvfs stat;
+    if (statvfs(secpolicy_peer_program(peer), &stat)) {
+        die("statvfs");
+    }
+    /* Only connect if the peer's executable path resides on a filesystem that
+     * is mounted read-only */
+    return (stat.f_flag & ST_RDONLY);
 }
 
 int main()
@@ -76,18 +74,14 @@ int main()
         die("secpolicy_create");
     }
 
-    /* Client should be running as user id 1000 and group id 1001 */
-    secpolicy_peer(policy, 1000, 1001);
-    /* Client should be running as user "admin" and group "db" */
-    secpolicy_peer_name(policy, "admin", "db");
-    /* Socket path should have the following perms */
-    secpolicy_perms(policy, S_IRUSR | S_IXUSR | S_IWUSR);
-    /* Client process should be running with the following executable */
-    secpolicy_program(policy, "/usr/bin/socat");
-    /* Client should pass additional security checks */
-    secpolicy_cb(policy, _verify_peer, NULL);
-    /* Client is not running with LSM credentials */
-    secpolicy_peer_creds(policy, "unconfined");
+    secpolicy_rule_uid(policy, 1000);
+    secpolicy_rule_gid(policy, 1000);
+    secpolicy_rule_user(policy, "admin");
+    secpolicy_rule_group(policy, "root");
+    secpolicy_rule_perms(policy, S_IRUSR | S_IXUSR | S_IWUSR);
+    secpolicy_rule_program(policy, "/usr/bin/socat");
+    secpolicy_rule_callback(policy, _verify_peer, NULL);
+    secpolicy_rule_creds(policy, "unconfined");
 
     client = accept(sock, NULL, NULL);
     if (client == -1) {
@@ -99,11 +93,10 @@ int main()
     }
     if (result != 0) {
         fprintf(stderr, "Security policy failed: 0x%" PRIx64 "\n", result);
-        (void)close(client);
-        exit(1);
     }
-
-    printf("Client verified: %d\n", client);
+    else {
+        printf("Client verified: %d\n", client);
+    }
 
     (void)close(client);
     (void)close(sock);

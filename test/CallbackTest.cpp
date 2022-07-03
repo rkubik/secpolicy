@@ -28,15 +28,16 @@ TEST_CASE("Peer Test")
 
     for (auto &&[ret, expected_result] : {
              std::tuple<bool, secpolicy_result_t>{true, 0},
-             std::tuple<bool, secpolicy_result_t>{false, SECPOLICY_RESULT_CB},
+             std::tuple<bool, secpolicy_result_t>{false,
+                                                  SECPOLICY_RESULT_CALLBACK},
          }) {
         DYNAMIC_SECTION("Policy should return " << std::hex << expected_result
                                                 << " when callback returns "
                                                 << (ret ? "true" : "false"))
         {
             bool cb_ret = ret;
-            secpolicy_cb(policy.get(), verify_connection,
-                         static_cast<void *>(&cb_ret));
+            secpolicy_rule_callback(policy.get(), verify_connection,
+                                    static_cast<void *>(&cb_ret));
 
             int ret;
             secpolicy_result_t result;
